@@ -36,7 +36,10 @@ import {
   FileText,
   BarChart3,
   UserPlus,
-  Database
+  Database,
+  Download,
+  FileJson,
+  FileSpreadsheet
 } from "lucide-react";
 
 import "./App.css";
@@ -388,6 +391,7 @@ function Dashboard() {
   const [sequence, setSequence] = useState("");
   const [result, setResult] = useState(null);
   const [error, setError] = useState("");
+  const [exportMessage, setExportMessage] = useState("");
   const [loading, setLoading] = useState(false);
 
   // PhysioNet Dataset Integration State
@@ -404,9 +408,11 @@ function Dashboard() {
   const loadDatasetPatientSample = async (idx = null, risk = null) => {
     setFetchingSample(true);
     setError("");
+    setExportMessage("");
     try {
       const res = await apiGetDatasetSamples(idx, risk);
       if (res && res.sequence && res.sequence.length > 0) {
+        setResult(null);
         setPatientId(res.patientId);
         setSequence(JSON.stringify(res.sequence, null, 2));
         setSampleIndex(res.sampleIndex);
@@ -453,6 +459,7 @@ function Dashboard() {
 
   const handlePredict = async () => {
     setError("");
+    setExportMessage("");
     setResult(null);
 
     if (!patientId.trim()) {
@@ -496,7 +503,15 @@ function Dashboard() {
       }
 
       const data = await response.json();
-      setResult({ ...data, patientId, groundTruth: currentDatasetMeta?.targetLabel });
+      setResult({
+        ...data,
+        patientId,
+        groundTruth: currentDatasetMeta?.targetLabel,
+        sampleIndex: currentDatasetMeta?.sampleIndex,
+        inputSequence: parsedSequence,
+        features: datasetInfo?.features || [],
+        datasetName: datasetInfo?.dataset_name || "PhysioNet 2019 Sepsis Challenge",
+      });
 
       // Record Audit Log
       addAuditLog({
@@ -548,11 +563,104 @@ function Dashboard() {
     }
   };
 
+  const handleExportReport = (format) => {
+    if (!result?.inputSequence) return;
+
+    const generatedAt = new Date().toISOString();
+    const report = {
+      reportType: "Sepsis model research evaluation",
+      generatedAt,
+      notice:
+        "Academic prototype only. This AI-generated estimate is not a clinical diagnosis or a substitute for professional medical judgment.",
+      dataset: {
+        name: result.datasetName,
+        patientId: result.patientId,
+        sampleIndex: result.sampleIndex ?? null,
+        groundTruth: result.groundTruth || "Not available",
+      },
+      evaluation: {
+        model: "LSTM",
+        prediction: Number(result.prediction),
+        probability: Number(result.probability),
+        message: result.message,
+        evaluatedAt: result.dateTime || generatedAt,
+      },
+      input: {
+        timeSteps: result.inputSequence.length,
+        featureCount: result.inputSequence[0]?.length || 0,
+        features: result.features,
+        sequence: result.inputSequence,
+      },
+    };
+
+    const escapeCsv = (value) => {
+      let text = String(value ?? "");
+      if (typeof value === "string" && /^[=+\-@\t\r]/.test(text)) text = `'${text}`;
+      return `"${text.replace(/"/g, '""')}"`;
+    };
+    const safePatientId = String(result.patientId || "sample").replace(/[^a-z0-9_-]/gi, "_");
+    let content;
+    let mimeType;
+    let extension;
+
+    if (format === "csv") {
+      const featureNames = result.inputSequence[0].map(
+        (_, index) => result.features[index] || `feature_${index + 1}`
+      );
+      const headers = [
+        "patient_id",
+        "dataset_name",
+        "sample_index",
+        "evaluated_at",
+        "model",
+        "prediction",
+        "probability",
+        "ground_truth",
+        "time_step",
+        ...featureNames,
+      ];
+      const rows = result.inputSequence.map((values, index) => [
+        result.patientId,
+        result.datasetName,
+        result.sampleIndex ?? "",
+        report.evaluation.evaluatedAt,
+        report.evaluation.model,
+        report.evaluation.prediction,
+        report.evaluation.probability,
+        report.dataset.groundTruth,
+        index + 1,
+        ...values,
+      ]);
+      content = [headers, ...rows].map((row) => row.map(escapeCsv).join(",")).join("\r\n");
+      mimeType = "text/csv;charset=utf-8";
+      extension = "csv";
+    } else {
+      content = JSON.stringify(report, null, 2);
+      mimeType = "application/json";
+      extension = "json";
+    }
+
+    try {
+      const blob = new Blob([content], { type: mimeType });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `sepsis-evaluation-${safePatientId}.${extension}`;
+      link.click();
+      window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+      setExportMessage(`${extension.toUpperCase()} report downloaded.`);
+    } catch (exportError) {
+      console.error("Could not export the evaluation report:", exportError);
+      setExportMessage("Report export failed. Please try again.");
+    }
+  };
+
   const handleReset = () => {
     setPatientId("");
     setSequence("");
     setResult(null);
     setError("");
+    setExportMessage("");
   };
 
   return (
@@ -847,6 +955,43 @@ function Dashboard() {
                     {result.groundTruth || "N/A"}
                   </strong>
                 </div>
+              </div>
+
+              <div className="report-export">
+                <div className="report-export-copy">
+                  <strong>Research report</strong>
+                  <span>Export this evaluation and its exact input sequence.</span>
+                </div>
+                <div className="report-export-actions">
+                  <button
+                    className="btn-secondary"
+                    type="button"
+                    onClick={() => handleExportReport("csv")}
+                    aria-label="Download evaluation as CSV"
+                  >
+                    <FileSpreadsheet size={15} /> CSV
+                  </button>
+                  <button
+                    className="btn-secondary"
+                    type="button"
+                    onClick={() => handleExportReport("json")}
+                    aria-label="Download evaluation as JSON"
+                  >
+                    <FileJson size={15} /> JSON
+                    <Download size={14} />
+                  </button>
+                </div>
+                {exportMessage && (
+                  <span
+                    className={`report-export-status${exportMessage.startsWith("Report export failed") ? " error" : ""}`}
+                    role="status"
+                  >
+                    {exportMessage}
+                  </span>
+                )}
+                <p className="report-export-disclaimer">
+                  Exports are for research only and are not clinical records or diagnostic advice.
+                </p>
               </div>
             </div>
           )}
