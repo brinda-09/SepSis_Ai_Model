@@ -1,0 +1,56 @@
+{
+  "xgboost": {
+    "accuracy": 0.9059,
+    "precision": 0.0938,
+    "recall": 0.4065,
+    "f1": 0.1524,
+    "auc": 0.7602,
+    "confusion_matrix": [
+      [
+        27910,
+        2541
+      ],
+      [
+        384,
+        263
+      ]
+    ],
+    "class_0": {
+      "precision": 0.9864,
+      "recall": 0.9166,
+      "f1": 0.9502
+    },
+    "class_1": {
+      "precision": 0.0938,
+      "recall": 0.4065,
+      "f1": 0.1524
+    }
+  },
+  "lstm": {
+    "accuracy": 0.8639,
+    "precision": 0.0612,
+    "recall": 0.3864,
+    "f1": 0.1057,
+    "auc": 0.702,
+    "confusion_matrix": [
+      [
+        26617,
+        3834
+      ],
+      [
+        397,
+        250
+      ]
+    ],
+    "class_0": {
+      "precision": 0.9853,
+      "recall": 0.8741,
+      "f1": 0.9264
+    },
+    "class_1": {
+      "precision": 0.0612,
+      "recall": 0.3864,
+      "f1": 0.1057
+    }
+  }
+}
