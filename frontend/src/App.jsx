@@ -1009,17 +1009,13 @@ function Dashboard() {
 ========================================================= */
 function App() {
   const [user, setUser] = useState(() => {
-    const savedUser = localStorage.getItem("sepsis_user");
-    return savedUser
-      ? JSON.parse(savedUser)
-      : {
-          name: "Dr. Alex Vance",
-          email: "alex.vance@icu-hospital.org",
-          role: "Doctor",
-          title: "Lead ICU Clinician",
-          employeeId: "DOC-9021",
-          department: "Intensive Care Unit",
-        };
+    try {
+      const savedUser = localStorage.getItem("sepsis_user");
+      return savedUser ? JSON.parse(savedUser) : null;
+    } catch {
+      localStorage.removeItem("sepsis_user");
+      return null;
+    }
   });
 
   const handleLogin = (userData) => {

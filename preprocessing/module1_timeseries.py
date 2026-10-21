@@ -171,19 +171,7 @@ print(constant_columns)
 # 9. REMOVE UNNECESSARY CONSTANT COLUMNS
 # ============================================================
 
-if len(constant_columns) > 0:
-
-    # Don't remove target
-    constant_columns = [
-        col for col in constant_columns
-        if col != "SepsisLabel"
-    ]
-
-    data = data.drop(
-        columns=constant_columns
-    )
-
-print("\nShape after constant column removal:")
+print("\nKeeping all columns to preserve the model feature schema:")
 print(data.shape)
 
 

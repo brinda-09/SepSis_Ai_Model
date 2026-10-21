@@ -91,17 +91,14 @@ export async function apiGetAlerts() {
 }
 
 export async function apiReviewAlert(id, reviewedBy) {
-  try {
-    return await request(`/api/alerts/${id}/review`, {
-      method: "PUT",
-      body: JSON.stringify({ reviewedBy }),
-    });
-  } catch {
-    const saved = JSON.parse(localStorage.getItem("sepsis_alerts")) || [];
-    const updated = saved.map((a) => (a.id === id ? { ...a, status: "Reviewed" } : a));
-    localStorage.setItem("sepsis_alerts", JSON.stringify(updated));
-    return { message: "Reviewed locally" };
-  }
+  return apiUpdateAlertStatus(id, "REVIEWED", reviewedBy);
+}
+
+export async function apiUpdateAlertStatus(id, status, reviewedBy) {
+  return request(`/api/alerts/${id}/status`, {
+    method: "PUT",
+    body: JSON.stringify({ status, reviewedBy }),
+  });
 }
 
 export async function apiDeleteAlert(id) {
@@ -177,14 +174,8 @@ export async function apiGithubAuthExchange(code) {
 }
 
 export async function apiRegister(userData) {
-  try {
-    return await request("/api/auth/register", {
-      method: "POST",
-      body: JSON.stringify(userData),
-    });
-  } catch {
-    const saved = JSON.parse(localStorage.getItem("sepsis_registered_users")) || [];
-    localStorage.setItem("sepsis_registered_users", JSON.stringify([userData, ...saved]));
-    return userData;
-  }
+  return request("/api/auth/register", {
+    method: "POST",
+    body: JSON.stringify(userData),
+  });
 }

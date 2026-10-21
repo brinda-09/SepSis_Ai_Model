@@ -27,7 +27,7 @@ import {
 } from "lucide-react";
 import { addAuditLog } from "../utils/auditLogger";
 import { recordAccessSession } from "../utils/sessionLogger";
-import { apiGithubAuthExchange, apiGithubAuthStart } from "../api";
+import { apiGithubAuthExchange, apiGithubAuthStart, apiLogin, apiRegister } from "../api";
 
 /* DEFAULT SEED NURSE REGISTRY IF EMPTY */
 const DEFAULT_NURSE_REGISTRY = [
@@ -79,6 +79,7 @@ function Login({ onLogin, onNurseSessionStart }) {
 
   const [showPassword, setShowPassword] = useState(false);
   const [githubLoading, setGithubLoading] = useState(false);
+  const [accountLoading, setAccountLoading] = useState(false);
   const [error, setError] = useState("");
   const [successMessage, setSuccessMessage] = useState("");
 
@@ -162,53 +163,14 @@ function Login({ onLogin, onNurseSessionStart }) {
   /* ---------------------------------------------------------
      1-CLICK DEMO LOGIN SELECTOR
   --------------------------------------------------------- */
-  const handleDemoLogin = (roleType) => {
+  const handleDemoLogin = async (roleType) => {
     setError("");
     setSuccessMessage("");
 
     if (roleType === "Doctor") {
-      const user = {
-        id: "DOC-9021",
-        name: "Dr. Alex Vance",
-        email: "alex.vance@icu-hospital.org",
-        role: "Doctor",
-        title: "Critical Care Physician",
-        specialization: "Critical Care Medicine",
-        employeeId: "DOC-9021",
-        department: "Intensive Care Unit (ICU)",
-      };
-      onLogin(user);
-      recordAccessSession({
-        name: user.name,
-        personId: user.employeeId,
-        role: "Doctor",
-        accessType: "Account Login",
-        accessStatus: "Account Login",
-        sessionStatus: "ACTIVE"
-      });
-      addAuditLog({ action: "Doctor Login", user: user.name, role: "Doctor" });
-      navigate("/");
+      await signInAccount("alex.vance@icu-hospital.org", "password123", "Doctor");
     } else if (roleType === "Admin") {
-      const user = {
-        id: "ADM-1001",
-        name: "Marcus Thorne",
-        email: "admin.thorne@icu-hospital.org",
-        role: "Administrator",
-        title: "Clinical Systems Admin",
-        employeeId: "ADM-1001",
-        department: "Medical IT & AI Engineering",
-      };
-      onLogin(user);
-      recordAccessSession({
-        name: user.name,
-        personId: user.employeeId,
-        role: "Administrator",
-        accessType: "Admin Account Login",
-        accessStatus: "Account Login",
-        sessionStatus: "ACTIVE"
-      });
-      addAuditLog({ action: "Admin Login", user: user.name, role: "Administrator" });
-      navigate("/admin");
+      await signInAccount("admin.thorne@icu-hospital.org", "password123", "Administrator");
     } else if (roleType === "Nurse") {
       // Trigger Nurse Staff ID Verification for Sarah Jenkins (NUR-4412)
       setAuthMode("NURSE_ID");
@@ -216,10 +178,37 @@ function Login({ onLogin, onNurseSessionStart }) {
     }
   };
 
+  const signInAccount = async (email, password, expectedRole) => {
+    setAccountLoading(true);
+    try {
+      const user = await apiLogin(email, password, expectedRole);
+      const normalizedRole = user.role === "Admin" ? "Administrator" : user.role;
+      if (normalizedRole !== expectedRole) {
+        throw new Error("This account does not have the selected role.");
+      }
+
+      onLogin(user);
+      recordAccessSession({
+        name: user.name,
+        personId: user.employeeId || user.id,
+        role: normalizedRole,
+        accessType: "Account Login",
+        accessStatus: "Account Login",
+        sessionStatus: "ACTIVE"
+      });
+      addAuditLog({ action: `${normalizedRole} Login`, user: user.name, role: normalizedRole });
+      navigate(normalizedRole === "Administrator" ? "/admin" : "/");
+    } catch (err) {
+      setError(err.message || "Sign-in failed. Check the backend connection and try again.");
+    } finally {
+      setAccountLoading(false);
+    }
+  };
+
   /* ---------------------------------------------------------
      ACCOUNT LOGIN SUBMIT (DOCTOR / ADMIN)
   --------------------------------------------------------- */
-  const handleAccountLoginSubmit = (e) => {
+  const handleAccountLoginSubmit = async (e) => {
     e.preventDefault();
     setError("");
     setSuccessMessage("");
@@ -229,13 +218,18 @@ function Login({ onLogin, onNurseSessionStart }) {
       return;
     }
 
-    // Check Registered Doctors / Users
-    const doctorList = JSON.parse(localStorage.getItem("sepsis_doctors") || "[]");
-    const regUsers = JSON.parse(localStorage.getItem("sepsis_registered_users") || "[]");
-
-    const foundDoctor = doctorList.find(
-      (d) => (d.email || "").toLowerCase() === loginEmail.trim().toLowerCase()
-    );
+    let doctorList = [];
+    try {
+      doctorList = JSON.parse(localStorage.getItem("sepsis_doctors") || "[]");
+    } catch {
+      setError("The local doctor verification registry is invalid. Contact an administrator.");
+      return;
+    }
+    if (!Array.isArray(doctorList)) {
+      setError("The local doctor verification registry is invalid. Contact an administrator.");
+      return;
+    }
+    const foundDoctor = doctorList.find((d) => (d.email || "").toLowerCase() === loginEmail.trim().toLowerCase());
 
     if (foundDoctor) {
       if (foundDoctor.verificationStatus === "PENDING" || foundDoctor.verificationStatus === "UNDER REVIEW") {
@@ -253,29 +247,7 @@ function Login({ onLogin, onNurseSessionStart }) {
       }
     }
 
-    const foundUser = regUsers.find(
-      (u) => (u.email || "").toLowerCase() === loginEmail.trim().toLowerCase() && u.password === loginPassword
-    );
-
-    if (foundUser) {
-      onLogin(foundUser);
-      recordAccessSession({
-        name: foundUser.name,
-        personId: foundUser.employeeId || foundUser.id,
-        role: foundUser.role,
-        accessType: "Account Login",
-        accessStatus: "Account Login",
-        sessionStatus: "ACTIVE"
-      });
-      addAuditLog({ action: `${foundUser.role} Login`, user: foundUser.name, role: foundUser.role });
-      if (foundUser.role === "Administrator" || foundUser.role === "Admin") {
-        navigate("/admin");
-      } else {
-        navigate("/");
-      }
-    } else {
-      setError("Invalid email or password.");
-    }
+    await signInAccount(loginEmail.trim(), loginPassword, loginRole);
   };
 
   /* ---------------------------------------------------------
@@ -434,7 +406,7 @@ function Login({ onLogin, onNurseSessionStart }) {
   /* ---------------------------------------------------------
      DOCTOR ACCOUNT ACTIVATION SUBMIT
   --------------------------------------------------------- */
-  const handleDoctorActivationSubmit = (e) => {
+  const handleDoctorActivationSubmit = async (e) => {
     e.preventDefault();
     if (!activationEmail || !activationPassword) {
       alert("Please fill in email and password.");
@@ -461,20 +433,23 @@ function Login({ onLogin, onNurseSessionStart }) {
       return;
     }
 
-    localStorage.setItem("sepsis_doctors", JSON.stringify(updatedDoctors));
-
-    // Add to registered users
-    const regUsers = JSON.parse(localStorage.getItem("sepsis_registered_users") || "[]");
-    const newReg = {
-      name: activatedDoc.name,
-      email: activatedDoc.email,
-      password: activationPassword,
-      role: "Doctor",
-      title: activatedDoc.title || "Critical Care Physician",
-      employeeId: activatedDoc.id || activatedDoc.hospitalId || "DOC-900",
-      department: activatedDoc.department || "Intensive Care Unit (ICU)"
-    };
-    localStorage.setItem("sepsis_registered_users", JSON.stringify([newReg, ...regUsers]));
+    setAccountLoading(true);
+    try {
+      await apiRegister({
+        name: activatedDoc.name,
+        email: activatedDoc.email,
+        password: activationPassword,
+        role: "Doctor",
+        employeeId: activatedDoc.id || activatedDoc.hospitalId || "DOC-900",
+        department: activatedDoc.department || "Intensive Care Unit (ICU)"
+      });
+      localStorage.setItem("sepsis_doctors", JSON.stringify(updatedDoctors));
+    } catch (err) {
+      setError(err.message || "Could not activate this account. Please try again.");
+      return;
+    } finally {
+      setAccountLoading(false);
+    }
 
     addAuditLog({
       action: "Doctor Account Activated",
@@ -620,7 +595,7 @@ function Login({ onLogin, onNurseSessionStart }) {
                   <Mail size={16} />
                   <input
                     type="text"
-                    placeholder="alex.vance@icu-hospital.org"
+                    placeholder="name@icu-hospital.org"
                     value={loginEmail}
                     onChange={(e) => setLoginEmail(e.target.value)}
                   />
@@ -647,8 +622,8 @@ function Login({ onLogin, onNurseSessionStart }) {
                 </div>
               </div>
 
-              <button type="submit" className="btn-primary auth-submit-btn">
-                <span>Sign In to Account</span> <ArrowRight size={16} />
+              <button type="submit" className="btn-primary auth-submit-btn" disabled={accountLoading}>
+                <span>{accountLoading ? "Signing in..." : "Sign In to Account"}</span> <ArrowRight size={16} />
               </button>
 
               <div className="github-auth-divider"><span>or</span></div>

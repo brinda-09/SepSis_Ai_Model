@@ -31,12 +31,27 @@ OUTPUT_PATH = os.path.join(
 # Number of previous hours used for prediction
 WINDOW_SIZE = 6
 
+FEATURE_COLUMNS = [
+    "HR", "O2Sat", "Temp", "SBP", "MAP", "DBP", "Resp", "BaseExcess", "HCO3", "FiO2",
+    "pH", "PaCO2", "SaO2", "AST", "BUN", "Alkalinephos", "Calcium", "Chloride", "Creatinine",
+    "Bilirubin_direct", "Glucose", "Lactate", "Magnesium", "Phosphate", "Potassium",
+    "Bilirubin_total", "TroponinI", "Hct", "Hgb", "PTT", "WBC", "Fibrinogen", "Platelets",
+    "Age", "Gender", "Unit1", "Unit2", "HospAdmTime", "ICULOS"
+]
+
 
 # ==========================================
 # FUNCTION TO CREATE SEQUENCES
 # ==========================================
 
 def create_sequences(df, window_size):
+    required_columns = {"patient_id", "SepsisLabel", *FEATURE_COLUMNS}
+    missing_columns = required_columns.difference(df.columns)
+    if missing_columns:
+        raise ValueError(
+            "Time-series data is missing required model columns: "
+            + ", ".join(sorted(missing_columns))
+        )
 
     X = []
     y = []
@@ -50,13 +65,7 @@ def create_sequences(df, window_size):
         # Reset index
         patient_data = patient_data.reset_index(drop=True)
 
-        # Remove columns that should not be model inputs
-        feature_columns = [
-            col for col in patient_data.columns
-            if col not in ["SepsisLabel", "patient_id"]
-        ]
-
-        features = patient_data[feature_columns].values
+        features = patient_data[FEATURE_COLUMNS].values
         labels = patient_data["SepsisLabel"].values
 
         # Need at least window_size + 1 rows

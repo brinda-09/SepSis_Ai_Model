@@ -19,7 +19,7 @@ import {
   CheckCheck,
   ShieldCheck
 } from "lucide-react";
-import { apiGetAlerts } from "../api";
+import { apiGetAlerts, apiUpdateAlertStatus } from "../api";
 import { addAuditLog } from "../utils/auditLogger";
 
 function Alerts() {
@@ -36,6 +36,8 @@ function Alerts() {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("All");
+  const [statusError, setStatusError] = useState("");
+  const [updatingAlertId, setUpdatingAlertId] = useState(null);
 
   const isNurse = currentUser?.role === "Nurse";
   const isAdmin = currentUser?.role === "Administrator" || currentUser?.role === "Admin";
@@ -45,10 +47,6 @@ function Alerts() {
     setLoading(true);
     try {
       let data = await apiGetAlerts();
-      if (!data || !Array.isArray(data) || data.length === 0) {
-        const saved = localStorage.getItem("sepsis_alerts");
-        data = saved ? JSON.parse(saved) : [];
-      }
       if (!Array.isArray(data)) data = [];
 
       // Standardize status labels safely
@@ -99,42 +97,47 @@ function Alerts() {
     loadAlerts();
   }, []);
 
-  const handleUpdateStatus = (alertId, nextStatus) => {
+  const handleUpdateStatus = async (alertId, nextStatus) => {
     const reviewerInfo = `${currentUser?.name || "Clinician"} (${currentUser?.role || "Staff"})`;
-    const updated = alerts.map((alert) => {
-      if (alert.id === alertId) {
-        return {
-          ...alert,
-          status: nextStatus,
-          reviewedBy: reviewerInfo,
-          reviewTime: new Date().toLocaleString()
-        };
-      }
-      return alert;
-    });
-
-    setAlerts(updated);
+    setStatusError("");
+    setUpdatingAlertId(alertId);
     try {
-      localStorage.setItem("sepsis_alerts", JSON.stringify(updated));
-    } catch (e) {
-      console.warn("Could not save sepsis_alerts to localStorage:", e);
+      await apiUpdateAlertStatus(alertId, nextStatus, reviewerInfo);
+      const updated = alerts.map((alert) =>
+        alert.id === alertId
+          ? {
+              ...alert,
+              status: nextStatus,
+              reviewedBy: reviewerInfo,
+              reviewTime: new Date().toLocaleString()
+            }
+          : alert
+      );
+      setAlerts(updated);
+      try {
+        localStorage.setItem("sepsis_alerts", JSON.stringify(updated));
+      } catch (storageError) {
+        console.warn("Could not update the local alert cache:", storageError);
+      }
+
+      const actionLabel =
+        nextStatus === "REVIEWED"
+          ? "Alert Reviewed"
+          : nextStatus === "ACKNOWLEDGED"
+          ? "Alert Acknowledged"
+          : "Alert Resolved";
+      const targetAlert = alerts.find((alert) => alert.id === alertId);
+      addAuditLog({
+        action: actionLabel,
+        entity: targetAlert?.patientId || `Patient #${alertId}`,
+        user: currentUser?.name || "User",
+        role: currentUser?.role || "Staff"
+      });
+    } catch (err) {
+      setStatusError(err.message || "Could not update alert status. Please try again.");
+    } finally {
+      setUpdatingAlertId(null);
     }
-
-    // Audit log recording
-    const actionLabel =
-      nextStatus === "REVIEWED"
-        ? "Alert Reviewed"
-        : nextStatus === "ACKNOWLEDGED"
-        ? "Alert Acknowledged"
-        : "Alert Resolved";
-
-    const targetAlert = alerts.find((a) => a.id === alertId);
-    addAuditLog({
-      action: actionLabel,
-      entity: targetAlert?.patientId || `Patient #${alertId}`,
-      user: currentUser?.name || "User",
-      role: currentUser?.role || "Staff"
-    });
   };
 
   const filteredAlerts = (Array.isArray(alerts) ? alerts : []).filter((alert) => {
@@ -425,6 +428,13 @@ function Alerts() {
           </div>
         </div>
 
+        {statusError && (
+          <div className="alert-error" role="alert">
+            <AlertTriangle size={16} />
+            <span>{statusError}</span>
+          </div>
+        )}
+
         {filteredAlerts.length === 0 ? (
           <div className="empty-result">
             <div
@@ -483,9 +493,10 @@ function Alerts() {
                             <button
                               className="btn-primary"
                               onClick={() => handleUpdateStatus(alert.id, "REVIEWED")}
+                              disabled={updatingAlertId === alert.id}
                               style={{ padding: "6px 12px", fontSize: "11px", width: "auto" }}
                             >
-                              <Eye size={12} /> Mark Reviewed
+                              <Eye size={12} /> {updatingAlertId === alert.id ? "Saving..." : "Mark Reviewed"}
                             </button>
                           )}
 
@@ -493,6 +504,7 @@ function Alerts() {
                             <button
                               className="btn-primary"
                               onClick={() => handleUpdateStatus(alert.id, "ACKNOWLEDGED")}
+                              disabled={updatingAlertId === alert.id}
                               style={{
                                 padding: "6px 12px",
                                 fontSize: "11px",
@@ -500,7 +512,7 @@ function Alerts() {
                                 background: "linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%)"
                               }}
                             >
-                              <CheckCheck size={12} /> Acknowledge Alert
+                              <CheckCheck size={12} /> {updatingAlertId === alert.id ? "Saving..." : "Acknowledge Alert"}
                             </button>
                           )}
 
@@ -508,6 +520,7 @@ function Alerts() {
                             <button
                               className="btn-primary"
                               onClick={() => handleUpdateStatus(alert.id, "RESOLVED")}
+                              disabled={updatingAlertId === alert.id}
                               style={{
                                 padding: "6px 12px",
                                 fontSize: "11px",
@@ -515,7 +528,7 @@ function Alerts() {
                                 background: "linear-gradient(135deg, #10b981 0%, #047857 100%)"
                               }}
                             >
-                              <CheckCircle2 size={12} /> Resolve Alert
+                              <CheckCircle2 size={12} /> {updatingAlertId === alert.id ? "Saving..." : "Resolve Alert"}
                             </button>
                           )}
 

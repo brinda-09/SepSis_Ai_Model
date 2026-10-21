@@ -103,6 +103,10 @@ class PatientCreate(BaseModel):
 class AlertReview(BaseModel):
     reviewedBy: str
 
+class AlertStatusUpdate(BaseModel):
+    status: str
+    reviewedBy: str
+
 class RoleUpdate(BaseModel):
     role: str
     status: Optional[str] = "Active"
@@ -478,6 +482,9 @@ def login(req: LoginRequest):
 
 @app.post("/api/auth/register")
 def register(req: RegisterRequest):
+    if req.role != "Doctor":
+        raise HTTPException(status_code=403, detail="Self-registration is only available for verified Doctor accounts.")
+
     conn = get_db_connection()
     cursor = conn.cursor()
     user_id = f"USR-{np.random.randint(100, 999)}"
@@ -602,13 +609,46 @@ def get_alerts():
 
 @app.put("/api/alerts/{alert_id}/review")
 def review_alert(alert_id: int, req: AlertReview):
+    return update_alert_status(
+        alert_id,
+        AlertStatusUpdate(status="REVIEWED", reviewedBy=req.reviewedBy)
+    )
+
+@app.put("/api/alerts/{alert_id}/status")
+def update_alert_status(alert_id: int, req: AlertStatusUpdate):
+    transitions = {
+        "NEW": "REVIEWED",
+        "ACTIVE": "REVIEWED",
+        "REVIEWED": "ACKNOWLEDGED",
+        "ACKNOWLEDGED": "RESOLVED",
+    }
+    if req.status not in {"REVIEWED", "ACKNOWLEDGED", "RESOLVED"}:
+        raise HTTPException(status_code=400, detail="Unsupported alert status.")
+
     conn = get_db_connection()
     cursor = conn.cursor()
+    cursor.execute("SELECT status FROM alerts WHERE id = ?", (alert_id,))
+    alert = cursor.fetchone()
+    if alert is None:
+        conn.close()
+        raise HTTPException(status_code=404, detail="Alert not found.")
+
+    current_status = str(alert["status"] or "NEW").upper()
+    if transitions.get(current_status) != req.status:
+        conn.close()
+        raise HTTPException(
+            status_code=409,
+            detail=f"Cannot move alert from {current_status} to {req.status}."
+        )
+
     now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
-    cursor.execute("UPDATE alerts SET status = 'Reviewed', reviewed_by = ?, review_time = ? WHERE id = ?", (req.reviewedBy, now_str, alert_id))
+    cursor.execute(
+        "UPDATE alerts SET status = ?, reviewed_by = ?, review_time = ? WHERE id = ?",
+        (req.status, req.reviewedBy, now_str, alert_id)
+    )
     conn.commit()
     conn.close()
-    return {"message": "Alert marked as reviewed"}
+    return {"message": f"Alert marked as {req.status.lower()}.", "status": req.status}
 
 @app.delete("/api/alerts/{alert_id}")
 def delete_alert(alert_id: int):
