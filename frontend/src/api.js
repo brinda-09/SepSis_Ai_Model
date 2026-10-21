@@ -1,11 +1,11 @@
 const API_BASE_URL = "http://127.0.0.1:8000";
 
-// Helper for HTTP requests with automatic fallback
+// Shared HTTP request helper.
 async function request(endpoint, options = {}) {
   const url = `${API_BASE_URL}${endpoint}`;
   const config = {
-    headers: { "Content-Type": "application/json", ...options.headers },
     ...options,
+    headers: { "Content-Type": "application/json", ...options.headers },
   };
 
   try {
@@ -159,21 +159,10 @@ export async function apiUpdateUserRole(userId, role, status = "Active") {
 }
 
 export async function apiLogin(email, password, role) {
-  try {
-    return await request("/api/auth/login", {
-      method: "POST",
-      body: JSON.stringify({ email, password, role }),
-    });
-  } catch {
-    return {
-      name: email.split("@")[0].replace(".", " ").toUpperCase(),
-      email,
-      role: role || "Doctor",
-      title: `${role || "Doctor"} Practitioner`,
-      employeeId: "EMP-1001",
-      department: "Intensive Care Unit",
-    };
-  }
+  return request("/api/auth/login", {
+    method: "POST",
+    body: JSON.stringify({ email, password, role }),
+  });
 }
 
 export async function apiGithubAuthStart() {

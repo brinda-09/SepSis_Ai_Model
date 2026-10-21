@@ -1,9 +1,8 @@
-# Ignore processed dataset files
-ai-model/dataset/processed/*.npy
-
 # Ignore Python cache and virtual environments
 __pycache__/
 *.pyc
 venv/
 .venv/
+
+# Ignore generated sequence arrays
 dataset/processed/*.npy

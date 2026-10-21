@@ -456,21 +456,15 @@ def github_auth_exchange(req: GithubCodeExchange):
 def login(req: LoginRequest):
     conn = get_db_connection()
     cursor = conn.cursor()
-    cursor.execute("SELECT * FROM users WHERE LOWER(email) = LOWER(?) AND password = ?", (req.email, req.password))
+    cursor.execute(
+        "SELECT * FROM users WHERE LOWER(email) = LOWER(?) AND password = ? AND status = 'Active'",
+        (req.email, req.password)
+    )
     user = cursor.fetchone()
     conn.close()
 
     if not user:
-        # Allow demo login if default password
-        name = req.email.split("@")[0].replace(".", " ").title()
-        return {
-            "name": name if name else "Clinical User",
-            "email": req.email,
-            "role": req.role,
-            "title": f"{req.role} Practitioner",
-            "employeeId": f"EMP-{np.random.randint(1000, 9999)}",
-            "department": "Intensive Care Unit"
-        }
+        raise HTTPException(status_code=401, detail="Invalid email or password.")
 
     return {
         "id": user["id"],
@@ -665,14 +659,16 @@ def predict(request: PredictionRequest):
 
     if sequence.shape != (6, 39):
         raise HTTPException(status_code=400, detail="Sequence shape must be exactly (6, 39)")
+    if not np.isfinite(sequence).all():
+        raise HTTPException(status_code=400, detail="Sequence values must all be finite numbers.")
 
-    if model is not None:
-        seq_batch = np.expand_dims(sequence, axis=0)
-        prob = float(model.predict(seq_batch, verbose=0)[0][0])
-    else:
-        # Fallback prediction if keras model missing
-        hr_val = sequence[0][0]
-        prob = 0.887 if hr_val > 90 else 0.084
+    if model is None:
+        raise HTTPException(status_code=503, detail="LSTM model is not available.")
+
+    seq_batch = np.expand_dims(sequence, axis=0)
+    prob = float(model.predict(seq_batch, verbose=0)[0][0])
+    if not np.isfinite(prob) or not 0 <= prob <= 1:
+        raise HTTPException(status_code=500, detail="LSTM model returned an invalid probability.")
 
     pred = int(prob >= 0.5)
     msg = "Sepsis risk detected by LSTM model." if pred == 1 else "No sepsis risk detected."
@@ -711,13 +707,16 @@ def predict_xgboost(request: PredictionRequest):
 
     if sequence.shape != (6, 39):
         raise HTTPException(status_code=400, detail="Sequence shape must be exactly (6, 39)")
+    if not np.isfinite(sequence).all():
+        raise HTTPException(status_code=400, detail="Sequence values must all be finite numbers.")
 
-    if xgb_model is not None:
-        seq_flat = sequence.reshape(1, -1)
-        prob = float(xgb_model.predict_proba(seq_flat)[0][1])
-    else:
-        hr_val = sequence[0][0]
-        prob = 0.895 if hr_val > 90 else 0.092
+    if xgb_model is None:
+        raise HTTPException(status_code=503, detail="XGBoost model is not available.")
+
+    seq_flat = sequence.reshape(1, -1)
+    prob = float(xgb_model.predict_proba(seq_flat)[0][1])
+    if not np.isfinite(prob) or not 0 <= prob <= 1:
+        raise HTTPException(status_code=500, detail="XGBoost model returned an invalid probability.")
 
     pred = int(prob >= 0.5)
     msg = "Sepsis risk detected by XGBoost baseline model." if pred == 1 else "No sepsis risk detected."

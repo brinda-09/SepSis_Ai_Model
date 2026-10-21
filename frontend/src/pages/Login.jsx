@@ -22,7 +22,8 @@ import {
   CheckCircle2,
   X,
   KeyRound,
-  ShieldAlert
+  ShieldAlert,
+  Info
 } from "lucide-react";
 import { addAuditLog } from "../utils/auditLogger";
 import { recordAccessSession } from "../utils/sessionLogger";
@@ -273,31 +274,7 @@ function Login({ onLogin, onNurseSessionStart }) {
         navigate("/");
       }
     } else {
-      // Default fallback account login for demonstration
-      const user = {
-        name: loginEmail.split("@")[0].replace(".", " ").toUpperCase(),
-        email: loginEmail,
-        role: loginRole,
-        title: loginRole === "Doctor" ? "Critical Care Physician" : "System Administrator",
-        specialization: loginRole === "Doctor" ? "Critical Care Medicine" : "IT Security",
-        employeeId: "EMP-" + Math.floor(1000 + Math.random() * 9000),
-        department: "Intensive Care Unit (ICU)",
-      };
-      onLogin(user);
-      recordAccessSession({
-        name: user.name,
-        personId: user.employeeId,
-        role: user.role,
-        accessType: "Account Login",
-        accessStatus: "Account Login",
-        sessionStatus: "ACTIVE"
-      });
-      addAuditLog({ action: `${user.role} Login`, user: user.name, role: user.role });
-      if (user.role === "Administrator" || user.role === "Admin") {
-        navigate("/admin");
-      } else {
-        navigate("/");
-      }
+      setError("Invalid email or password.");
     }
   };
 

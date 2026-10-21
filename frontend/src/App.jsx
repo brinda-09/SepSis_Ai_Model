@@ -401,14 +401,6 @@ function Dashboard() {
   const isAdmin = roleNorm === "Administrator";
   const isDoctor = roleNorm === "Doctor";
 
-  // Load Dataset Metadata & Initial PhysioNet Patient Sample on mount
-  useEffect(() => {
-    apiGetDatasetInfo().then((info) => {
-      if (info) setDatasetInfo(info);
-    });
-    loadDatasetPatientSample(0);
-  }, []);
-
   const loadDatasetPatientSample = async (idx = null, risk = null) => {
     setFetchingSample(true);
     setError("");
@@ -436,6 +428,14 @@ function Dashboard() {
       setFetchingSample(false);
     }
   };
+
+  // Load dataset metadata and the initial sample after the loader is initialized.
+  useEffect(() => {
+    apiGetDatasetInfo().then((info) => {
+      if (info) setDatasetInfo(info);
+    });
+    loadDatasetPatientSample(0);
+  }, []);
 
   const handleNextPatient = () => {
     const total = currentDatasetMeta?.totalSamples || 31098;
@@ -471,7 +471,12 @@ function Dashboard() {
     if (
       !Array.isArray(parsedSequence) ||
       parsedSequence.length !== 6 ||
-      !parsedSequence.every((row) => Array.isArray(row) && row.length === 39)
+      !parsedSequence.every(
+        (row) =>
+          Array.isArray(row) &&
+          row.length === 39 &&
+          row.every((value) => typeof value === "number" && Number.isFinite(value))
+      )
     ) {
       setError("Sequence matrix must contain exactly 6 timesteps and 39 clinical features (6×39 input shape).");
       return;
@@ -486,7 +491,8 @@ function Dashboard() {
       });
 
       if (!response.ok) {
-        throw new Error("Prediction API request failed.");
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.detail || `Prediction API request failed (${response.status}).`);
       }
 
       const data = await response.json();
@@ -535,66 +541,8 @@ function Dashboard() {
           role: roleNorm
         });
       }
-    } catch {
-      // Client Fallback Evaluation if FastAPI Server is Offline
-      const hrVal = parsedSequence[0]?.[0] || 0;
-      const tempVal = parsedSequence[0]?.[1] || 0;
-      const isSimulatedHigh = hrVal > 90 || tempVal > 38.0;
-      const simulatedProbability = isSimulatedHigh ? 0.887 : 0.084;
-      const simulatedPrediction = isSimulatedHigh ? 1 : 0;
-
-      const data = {
-        prediction: simulatedPrediction,
-        probability: simulatedProbability,
-        message: isSimulatedHigh
-          ? "Sepsis risk detected by temporal sequence model evaluation."
-          : "No elevated sepsis indications detected across input time window.",
-      };
-
-      setResult({ ...data, patientId, groundTruth: currentDatasetMeta?.targetLabel, isOfflineMode: true });
-
-      // Audit Log
-      addAuditLog({
-        action: "Prediction Generated",
-        entity: patientId,
-        user: currentUser.name,
-        role: roleNorm
-      });
-
-      // Save History
-      const historyRecord = {
-        id: Date.now(),
-        patientId,
-        probability: data.probability,
-        prediction: data.prediction,
-        message: data.message,
-        dateTime: new Date().toLocaleString(),
-      };
-      const existingHistory = JSON.parse(localStorage.getItem("sepsis_prediction_history")) || [];
-      localStorage.setItem("sepsis_prediction_history", JSON.stringify([historyRecord, ...existingHistory]));
-
-      // Save Alert if Sepsis Detected
-      if (simulatedPrediction === 1) {
-        const alertRecord = {
-          id: Date.now() + 1,
-          patientId,
-          probability: data.probability,
-          prediction: data.prediction,
-          riskLevel: "High Risk",
-          status: "NEW",
-          dateTime: new Date().toLocaleString(),
-          message: data.message,
-        };
-        const existingAlerts = JSON.parse(localStorage.getItem("sepsis_alerts")) || [];
-        localStorage.setItem("sepsis_alerts", JSON.stringify([alertRecord, ...existingAlerts]));
-
-        addAuditLog({
-          action: "Sepsis Alert Generated",
-          entity: patientId,
-          user: currentUser.name,
-          role: roleNorm
-        });
-      }
+    } catch (err) {
+      setError(err.message || "Prediction failed. Check the backend connection and try again.");
     } finally {
       setLoading(false);
     }
